@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Test / type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local runtime artifacts (the plugin writes these next to bort-memory)
+bort-memory/
+*.jsonl
+cid_map.json
+
+# Local credentials — defensive; the plugin reads keys from process env only,
+# but contributors must never commit a .env if they add one downstream.
+.env
+.env.*
+!.env.example
+
+# IDEs / editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS noise
+.DS_Store
+Thumbs.db

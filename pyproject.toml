@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-bort"
+version = "0.1.0"
+description = "BORT (BAP-578) integration plugin for Hermes Agent"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "BORT Agents"}]
+requires-python = ">=3.10"
+dependencies = [
+    "web3>=6.20",
+    "httpx>=0.26",
+    "eth-account>=0.10",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+]
+
+[project.entry-points."hermes_agent.plugins"]
+hermes-bort = "hermes_bort"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hermes_bort*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

@@ -1,0 +1,47 @@
+manifest_version: 1
+name: hermes-bort
+version: 0.1.0
+kind: standalone
+description: |
+  BORT (BAP-578) integration for Hermes Agent.
+  Read NFT-bound agent state from BSC mainnet via the BORT runtime API and
+  direct on-chain calls. IPFS-backed portable memory.
+author: BORT Agents
+license: MIT
+homepage: https://github.com/BORT-AGENTS/hermes-bort
+platforms: [linux, macos, windows]
+
+metadata:
+  hermes:
+    tags: [blockchain, bnb, bsc, nft, bap-578, web3, bort]
+    category: blockchain
+    config:
+      bort_api_url:
+        type: string
+        default: "https://bap578-nfa-platform.onrender.com"
+        description: BORT runtime API base URL.
+      bsc_rpc_url:
+        type: string
+        default: "https://bsc-dataseed.binance.org"
+        description: BSC mainnet JSON-RPC endpoint.
+      bort_dapp_url:
+        type: string
+        env: BORT_DAPP_URL
+        default: "https://www.bortagent.xyz"
+        description: BORT dapp base URL used for marketplace deep links.
+      memory_dir:
+        type: string
+        default: "~/.hermes/bort-memory"
+        description: Local directory for cid-map and JSONL memory buffers.
+      pinata_api_key:
+        type: string
+        env: PINATA_API_KEY
+        secret: true
+        required: false
+        description: Pinata API key for IPFS pin operations (Phase 1.5+).
+      pinata_api_secret:
+        type: string
+        env: PINATA_API_SECRET
+        secret: true
+        required: false
+        description: Pinata API secret. Required only when memory write goes on-chain.
