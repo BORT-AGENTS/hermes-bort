@@ -1,5 +1,9 @@
 # hermes-bort
 
+[![PyPI](https://img.shields.io/pypi/v/hermes-bort.svg)](https://pypi.org/project/hermes-bort/)
+[![Python](https://img.shields.io/pypi/pyversions/hermes-bort.svg)](https://pypi.org/project/hermes-bort/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent) that lets a Hermes process read, act for, and anchor memory on BORT (BAP-578) agent NFTs on BSC mainnet.
 
 A BORT agent is an ERC-721 with on-chain state, an IPFS-pinned identity, a logic
@@ -17,11 +21,32 @@ gives Hermes:
 ## Install
 
 ```bash
+pip install hermes-bort
+```
+
+Or install it straight from Hermes:
+
+```bash
+hermes plugins install BORT-AGENTS/hermes-bort
+```
+
+Either way, enable it in `~/.hermes/config.yaml`:
+
+```yaml
+plugins:
+  enabled:
+    - hermes-bort
+```
+
+### From source
+
+```bash
+git clone https://github.com/BORT-AGENTS/hermes-bort
+cd hermes-bort
 pip install -e .[dev]
 ```
 
-Or copy the `hermes_bort/` package into `~/.hermes/plugins/` and enable it in
-`~/.hermes/config.yaml` under `plugins.enabled`.
+You can also drop the `hermes_bort/` package into `~/.hermes/plugins/` directly.
 
 ## Read-only quickstart
 
