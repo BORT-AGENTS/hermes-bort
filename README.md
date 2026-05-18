@@ -143,10 +143,22 @@ pinned to IPFS; both chain writes only simulate).
 | Flag | Effect |
 |---|---|
 | `--iterations N` | GEPA iterations (default 10). |
+| `--optimizer-model M` | LLM for GEPA reflections, litellm format (`anthropic/claude-sonnet-4-6`, `deepseek/deepseek-chat`, `openrouter/...`). Default: the optimizer's own default. |
+| `--eval-model M` | LLM for evaluations, litellm format. |
 | `--repo PATH` | Path to the `hermes-agent-self-evolution` repo. |
 | `--commit-only` | Skip the optimizer; commit the latest existing run dir. |
 | `--only {both,evolution,learning}` | Which on-chain steps to run (default `both`). |
 | `--min-improvement F` | Only commit if `metrics.improvement >= F`. |
+
+**LLM provider.** The optimizer runs on litellm, so any provider works:
+`--optimizer-model anthropic/claude-sonnet-4-6`, `deepseek/...`, `openrouter/...`,
+etc. The provider's API key (`ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, ...) is read
+from the environment.
+
+**Without Pinata.** `commit_evolution` pins the evolved skill to IPFS and needs
+Pinata credentials. `commit_learning` does not: `record_learning` only emits the
+content hash. So `--only learning` records the verifiable on-chain learning event
+with no IPFS and no Pinata key at all.
 
 If `commit_evolution` succeeds but `commit_learning` fails, retry just the
 learning step: `hermes bort evolve <skill> --token-id N --commit-only --only learning`.
