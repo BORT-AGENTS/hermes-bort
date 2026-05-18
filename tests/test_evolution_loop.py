@@ -170,7 +170,7 @@ def test_run_optimizer_success(tmp_path, monkeypatch):
     repo, skill = tmp_path, "myskill"
     (repo / "output" / skill).mkdir(parents=True)
 
-    def fake_run(cmd, cwd=None, timeout=None):
+    def fake_run(cmd, cwd=None, timeout=None, env=None):
         d = repo / "output" / skill / "20260518_120000"
         d.mkdir(parents=True)
         (d / "evolved_skill.md").write_text("# evolved\n", encoding="utf-8")
@@ -190,7 +190,7 @@ def test_run_optimizer_failed_marker(tmp_path, monkeypatch):
     repo, skill = tmp_path, "myskill"
     (repo / "output" / skill).mkdir(parents=True)
 
-    def fake_run(cmd, cwd=None, timeout=None):
+    def fake_run(cmd, cwd=None, timeout=None, env=None):
         (repo / "output" / skill / "evolved_FAILED.md").write_text("# fail\n", encoding="utf-8")
         return _FakeProc(0)
 
@@ -205,20 +205,38 @@ def test_run_optimizer_nonzero_exit(tmp_path, monkeypatch):
     repo, skill = tmp_path, "myskill"
     (repo / "output" / skill).mkdir(parents=True)
     monkeypatch.setattr(evolution_loop.subprocess, "run",
-                        lambda cmd, cwd=None, timeout=None: _FakeProc(1))
+                        lambda cmd, cwd=None, timeout=None, env=None: _FakeProc(1))
     run = evolution_loop.run_optimizer(repo, "python", skill, 1)
     assert run.error is not None
     assert "exited with code 1" in run.error
 
 
 def test_run_optimizer_interpreter_missing(tmp_path, monkeypatch):
-    def boom(cmd, cwd=None, timeout=None):
+    def boom(cmd, cwd=None, timeout=None, env=None):
         raise FileNotFoundError("no such interpreter")
 
     monkeypatch.setattr(evolution_loop.subprocess, "run", boom)
     run = evolution_loop.run_optimizer(tmp_path, "nopython", "skill", 1)
     assert run.error is not None
     assert "interpreter not found" in run.error
+
+
+def test_run_optimizer_passes_model_flags(tmp_path, monkeypatch):
+    repo, skill = tmp_path, "myskill"
+    (repo / "output" / skill).mkdir(parents=True)
+    captured = {}
+
+    def fake_run(cmd, cwd=None, timeout=None, env=None):
+        captured["cmd"] = cmd
+        return _FakeProc(0)
+
+    monkeypatch.setattr(evolution_loop.subprocess, "run", fake_run)
+    evolution_loop.run_optimizer(
+        repo, "python", skill, 2,
+        optimizer_model="anthropic/claude-sonnet-4-6", eval_model="deepseek/deepseek-chat")
+    cmd = captured["cmd"]
+    assert "--optimizer-model" in cmd and "anthropic/claude-sonnet-4-6" in cmd
+    assert "--eval-model" in cmd and "deepseek/deepseek-chat" in cmd
 
 
 # ----- preflight_check -----
@@ -290,6 +308,16 @@ async def test_preflight_broadcast_no_grant(monkeypatch):
     pf = await evolution_loop.preflight_check(11100)
     assert pf["ok"] is False
     assert any("WRITE permission" in p for p in pf["problems"])
+
+
+@pytest.mark.asyncio
+async def test_preflight_learning_only_skips_pinata(monkeypatch):
+    # learning-only commits no content, so a missing Pinata key must not block it.
+    monkeypatch.delenv("BORT_ALLOW_BROADCAST", raising=False)
+    monkeypatch.setattr(bort_ipfs, "pinata_configured", lambda: False)
+    pf = await evolution_loop.preflight_check(11100, only="learning")
+    assert pf["ok"] is True
+    assert not any("PINATA" in p for p in pf["problems"])
 
 
 # ----- chain_commits -----

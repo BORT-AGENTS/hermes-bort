@@ -166,6 +166,9 @@ def run_optimizer(
     skill: str,
     iterations: int,
     eval_source: str = "synthetic",
+    *,
+    optimizer_model: str | None = None,
+    eval_model: str | None = None,
     timeout: int | None = None,
 ) -> OptimizerRun:
     """Run the optimizer subprocess and resolve its result from the filesystem.
@@ -173,11 +176,23 @@ def run_optimizer(
     Does not capture stdout/stderr: the optimizer streams rich progress for minutes.
     The optimizer exits 0 even on guardrail failure and no-improvement, so the
     outcome is decided by what appears on disk, not by the exit code alone.
+
+    `optimizer_model` / `eval_model` are litellm model strings (e.g.
+    `anthropic/claude-...`, `deepseek/...`); when None the optimizer's own
+    defaults apply. The provider's API key is read from the inherited env.
     """
     before = snapshot_run_dirs(repo, skill)
-    cmd = build_optimizer_cmd(python, skill, iterations, eval_source)
+    extra: list[str] = []
+    if optimizer_model:
+        extra += ["--optimizer-model", optimizer_model]
+    if eval_model:
+        extra += ["--eval-model", eval_model]
+    cmd = build_optimizer_cmd(python, skill, iterations, eval_source, extra=extra or None)
+    # Force UTF-8 in the child: the optimizer prints emoji via rich, which crashes
+    # on a non-UTF-8 Windows console (cp1252 / cp1254 / ...).
+    child_env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     try:
-        proc = subprocess.run(cmd, cwd=str(repo), timeout=timeout)  # noqa: S603
+        proc = subprocess.run(cmd, cwd=str(repo), timeout=timeout, env=child_env)  # noqa: S603
     except FileNotFoundError as e:
         return OptimizerRun(ran=False, error=f"interpreter not found ({python}): {e}")
     except subprocess.TimeoutExpired:
@@ -204,14 +219,15 @@ def run_optimizer(
     return run
 
 
-async def preflight_check(token_id: int) -> dict[str, Any]:
+async def preflight_check(token_id: int, only: str = "both") -> dict[str, Any]:
     """Verify on-chain prerequisites BEFORE the expensive optimizer run.
 
     Returns {ok, broadcast, problems: [...], notes: [...]}.
 
-    Pinata is always required: commit_evolution pins the evolved skill to IPFS even
-    in dry-run mode. When BORT_ALLOW_BROADCAST is on, the operator key, funding, and
-    the vault grant are required too.
+    Pinata is required whenever commit_evolution runs (only in {both, evolution}):
+    it pins the evolved skill to IPFS even in dry-run mode. With `only="learning"`
+    no content is pinned, so Pinata is not needed. When BORT_ALLOW_BROADCAST is on,
+    the operator key, funding, and the vault grant are required too.
     """
     from . import bort_chain, bort_ipfs, bort_signer
 
@@ -222,10 +238,13 @@ async def preflight_check(token_id: int) -> dict[str, Any]:
         "1", "true", "yes", "on",
     )
 
-    if not bort_ipfs.pinata_configured():
+    if only == "learning":
+        notes.append("learning-only: skipping IPFS/Pinata check (no content is pinned).")
+    elif not bort_ipfs.pinata_configured():
         problems.append(
             "PINATA_API_KEY / PINATA_API_SECRET not set. commit_evolution pins the "
-            "evolved skill to IPFS even in dry-run mode, so this is required."
+            "evolved skill to IPFS even in dry-run mode, so this is required. "
+            "(Or use --only learning to record the on-chain learning event without IPFS.)"
         )
 
     if not broadcast:

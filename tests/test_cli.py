@@ -134,7 +134,8 @@ async def test_doctor_async_runs_without_crashing(monkeypatch):
 # ----- evolve subcommand -----
 def _evolve_ns(**over):
     base = dict(skill="myskill", token_id=11100, iterations=10, repo=None,
-                priority=50, commit_only=False, only="both", min_improvement=0.0)
+                priority=50, commit_only=False, only="both", min_improvement=0.0,
+                optimizer_model=None, eval_model=None)
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -155,6 +156,17 @@ def test_setup_bort_cli_wires_evolve():
     assert args.min_improvement == 0.0
     assert args.commit_only is False
     assert args.repo is None
+    assert args.optimizer_model is None
+    assert args.eval_model is None
+
+    # provider override flags parse
+    args2 = parser.parse_args([
+        "bort", "evolve", "myskill", "--token-id", "11100",
+        "--optimizer-model", "anthropic/claude-sonnet-4-6",
+        "--eval-model", "deepseek/deepseek-chat",
+    ])
+    assert args2.optimizer_model == "anthropic/claude-sonnet-4-6"
+    assert args2.eval_model == "deepseek/deepseek-chat"
 
 
 def test_cmd_evolve_invalid_skill():
@@ -200,11 +212,11 @@ def test_cmd_evolve_happy_path(tmp_path, monkeypatch):
                         lambda explicit=None: repo)
     monkeypatch.setattr(evolution_loop, "resolve_python", lambda r: "python")
 
-    async def fake_preflight(token_id):
+    async def fake_preflight(token_id, only="both"):
         return {"ok": True, "broadcast": False, "problems": [], "notes": ["dry run"]}
 
     def fake_run_optimizer(repo_, python, skill, iterations,
-                           eval_source="synthetic", timeout=None):
+                           eval_source="synthetic", **kw):
         return evolution_loop.OptimizerRun(
             ran=True, returncode=0, run_dir=run_dir,
             metrics={"improvement": 0.2, "iterations": 4},

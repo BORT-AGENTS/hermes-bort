@@ -251,7 +251,7 @@ async def _evolve_async(args) -> None:
         return
 
     # pre-flight: fail fast before the slow, paid optimizer run
-    pf = await evo.preflight_check(args.token_id)
+    pf = await evo.preflight_check(args.token_id, only=args.only)
     print("Pre-flight:")
     for note in pf["notes"]:
         print(f"  - {note}")
@@ -276,7 +276,10 @@ async def _evolve_async(args) -> None:
         print(f"  iterations:  {args.iterations}")
         print("Running the optimizer (this can take several minutes)...")
         print("-" * 60)
-        run = evo.run_optimizer(repo, python, skill, args.iterations)
+        run = evo.run_optimizer(
+            repo, python, skill, args.iterations,
+            optimizer_model=args.optimizer_model, eval_model=args.eval_model,
+        )
         print("-" * 60)
         if run.error:
             print(f"Optimizer did not produce a committable result: {run.error}")
@@ -352,6 +355,12 @@ def setup_bort_cli(subparser) -> None:
     p_ev.add_argument("skill", help="Skill name to evolve (e.g. github-code-review)")
     p_ev.add_argument("--token-id", dest="token_id", type=int, required=True, help="BAP-578 token ID")
     p_ev.add_argument("--iterations", type=int, default=10, help="GEPA iterations (default 10)")
+    p_ev.add_argument("--optimizer-model", dest="optimizer_model", default=None,
+                      help="LLM for GEPA reflections, litellm format "
+                           "(e.g. anthropic/claude-sonnet-4-6, deepseek/deepseek-chat). "
+                           "Default: the optimizer's own default.")
+    p_ev.add_argument("--eval-model", dest="eval_model", default=None,
+                      help="LLM for evaluations, litellm format. Default: the optimizer's own default.")
     p_ev.add_argument("--repo", default=None, help="Path to the hermes-agent-self-evolution repo")
     p_ev.add_argument("--priority", type=int, default=50, help="KR v2 knowledge-source priority (default 50)")
     p_ev.add_argument("--commit-only", dest="commit_only", action="store_true",
