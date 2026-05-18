@@ -15,6 +15,7 @@ from contextlib import redirect_stdout
 import pytest
 
 from hermes_bort import cli as bort_cli
+from hermes_bort import evolution_loop
 
 
 class _FakeCtx:
@@ -128,3 +129,99 @@ async def test_doctor_async_runs_without_crashing(monkeypatch):
     assert "hermes-bort doctor" in out
     assert "BSC RPC" in out
     assert "Done." in out
+
+
+# ----- evolve subcommand -----
+def _evolve_ns(**over):
+    base = dict(skill="myskill", token_id=11100, iterations=10, repo=None,
+                priority=50, commit_only=False, only="both", min_improvement=0.0)
+    base.update(over)
+    return argparse.Namespace(**base)
+
+
+def test_setup_bort_cli_wires_evolve():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="cmd")
+    bort_parser = sub.add_parser("bort")
+    bort_cli.setup_bort_cli(bort_parser)
+
+    args = parser.parse_args(["bort", "evolve", "myskill", "--token-id", "11100"])
+    assert args.func is bort_cli._cmd_evolve
+    assert args.skill == "myskill"
+    assert args.token_id == 11100
+    assert args.iterations == 10
+    assert args.priority == 50
+    assert args.only == "both"
+    assert args.min_improvement == 0.0
+    assert args.commit_only is False
+    assert args.repo is None
+
+
+def test_cmd_evolve_invalid_skill():
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        bort_cli._cmd_evolve(_evolve_ns(skill="bad name"))
+    assert "Invalid skill name" in buf.getvalue()
+
+
+def test_cmd_evolve_repo_not_found(monkeypatch):
+    monkeypatch.setattr(evolution_loop, "locate_self_evolution_repo",
+                        lambda explicit=None: None)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        bort_cli._cmd_evolve(_evolve_ns(repo="/no/such/dir"))
+    assert "repo not found" in buf.getvalue()
+
+
+def test_print_evolve_result_formatting():
+    result = {
+        "evolution": {"status": "ok", "pinned_cid": "Qm1", "tx_hash": "0xaaa"},
+        "learning": {"status": "ok", "tx_hash": "0xbbb"},
+        "chained": True,
+        "content_hash": "0x" + "ab" * 32,
+        "summary": "fully committed on-chain: knowledge source + learning event.",
+    }
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        bort_cli._print_evolve_result(result)
+    out = buf.getvalue()
+    assert "EVOLUTION" in out
+    assert "linked hash" in out
+    assert "fully committed" in out
+
+
+def test_cmd_evolve_happy_path(tmp_path, monkeypatch):
+    repo = tmp_path / "se"
+    repo.mkdir()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    monkeypatch.setattr(evolution_loop, "locate_self_evolution_repo",
+                        lambda explicit=None: repo)
+    monkeypatch.setattr(evolution_loop, "resolve_python", lambda r: "python")
+
+    async def fake_preflight(token_id):
+        return {"ok": True, "broadcast": False, "problems": [], "notes": ["dry run"]}
+
+    def fake_run_optimizer(repo_, python, skill, iterations,
+                           eval_source="synthetic", timeout=None):
+        return evolution_loop.OptimizerRun(
+            ran=True, returncode=0, run_dir=run_dir,
+            metrics={"improvement": 0.2, "iterations": 4},
+        )
+
+    async def fake_chain(token_id, rd, *, priority=50, only="both"):
+        return {
+            "evolution": {"status": "ok"}, "learning": {"status": "ok"},
+            "chained": True, "content_hash": "0x" + "12" * 32,
+            "summary": "fully committed on-chain.",
+        }
+
+    monkeypatch.setattr(evolution_loop, "preflight_check", fake_preflight)
+    monkeypatch.setattr(evolution_loop, "run_optimizer", fake_run_optimizer)
+    monkeypatch.setattr(evolution_loop, "chain_commits", fake_chain)
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        bort_cli._cmd_evolve(_evolve_ns())
+    assert "fully committed" in buf.getvalue()

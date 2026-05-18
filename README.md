@@ -115,7 +115,42 @@ hermes bort doctor
 ```
 
 Walks the setup: RPC reachable, operator key valid and funded, policy file present
-and parseable, Pinata creds set if you plan to anchor memory.
+and parseable, Pinata creds set if you plan to anchor memory, and the
+`hermes-agent-self-evolution` repo if you plan to use `evolve`.
+
+### Evolve
+
+Run the [`hermes-agent-self-evolution`](https://github.com/NousResearch/hermes-agent-self-evolution)
+optimizer for a skill and, if it improved, commit the result on-chain in one step:
+
+```bash
+hermes bort evolve github-code-review --token-id 11100
+```
+
+It runs the optimizer as a subprocess and, only if `metrics.json` shows a real
+improvement, chains two on-chain writes linked by one content hash:
+
+- `commit_evolution` pins the evolved skill to IPFS and writes it as an
+  `INSTRUCTION` knowledge source on `KnowledgeRegistryV2`.
+- `commit_learning` emits a `LearningRecorded` event on the agent's logic
+  contract: a permanent, timestamped, verifiable on-chain learning record.
+
+The self-evolution repo is located via `--repo`, `$BORT_SELF_EVOLUTION_REPO`,
+`~/.hermes/hermes-agent-self-evolution`, or a sibling directory. With
+`BORT_ALLOW_BROADCAST` unset the whole loop is a dry run (the skill is still
+pinned to IPFS; both chain writes only simulate).
+
+| Flag | Effect |
+|---|---|
+| `--iterations N` | GEPA iterations (default 10). |
+| `--repo PATH` | Path to the `hermes-agent-self-evolution` repo. |
+| `--commit-only` | Skip the optimizer; commit the latest existing run dir. |
+| `--only {both,evolution,learning}` | Which on-chain steps to run (default `both`). |
+| `--min-improvement F` | Only commit if `metrics.improvement >= F`. |
+
+If `commit_evolution` succeeds but `commit_learning` fails, retry just the
+learning step: `hermes bort evolve <skill> --token-id N --commit-only --only learning`.
+Each run is a distinct on-chain event; the knowledge registry does not dedup.
 
 ## Tools
 
@@ -139,7 +174,7 @@ disposition, and (when `confirm`) the Hermes approval prompt. With
 | Tool | What it does |
 |---|---|
 | `bort_grant_permission_uri(token_id, operator, ...)` | Builds the two owner-signed transactions to give the operator a `WRITE` grant on the agent's vault. |
-| `bort_commit_learning(token_id, claim_root, ...)` | Records a learning leaf on the logic contract via `record_learning` (Hunter / Trading V5 / CTO). |
+| `bort_commit_learning(token_id, data_hash, ...)` | Emits a `LearningRecorded` event on the logic contract via `record_learning` (Hunter / Trading V5 / CTO). A permanent on-chain learning record; mutates no score. |
 | `bort_invoke(token_id, action, args)` | Universal write: any catalogued `handleAction` through `VPMv2.forwardHandleAction`. 13 actions wired today. |
 | `bort_anchor_memory(token_id)` | Pins the agent's local JSONL memory buffer to IPFS and writes a `MEMORY` source through `KnowledgeRegistryV2.addKnowledgeSourceDelegated`. |
 | `bort_commit_evolution(token_id, output_dir)` | Anchors a `hermes-agent-self-evolution` run (`output/<skill>/<timestamp>/evolved_skill.md` + `metrics.json`) as an `INSTRUCTION` knowledge source. |
@@ -308,7 +343,8 @@ hermes_bort/
   bort_signer.py              operator key load + broadcast
   bort_policy.py              ~/.hermes/bort-policy.yaml loader + writer
   approval.py                 Hermes approval prompt integration
-  cli.py                      hermes bort init-operator / init-policy / doctor / anchor-memory / commit-evolution
+  cli.py                      hermes bort init-operator / init-policy / doctor / anchor-memory / commit-evolution / evolve
+  evolution_loop.py           self-evolution optimizer runner + on-chain commit chain
   tools/
     read_agent.py health_check.py list_actions.py
     marketplace_browse.py marketplace_agent.py list_agent_uri.py

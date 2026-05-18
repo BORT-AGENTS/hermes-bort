@@ -41,10 +41,11 @@ ACTION_NAME = "record_learning"
 SCHEMA = {
     "name": "bort_commit_learning",
     "description": (
-        "Commit a learning event (32-byte digest + interaction count) to "
-        "MerkleTreeLearning via the agent's logic contract's record_learning action, "
-        "routed through VPMv2.forwardHandleAction. Advances the agent's on-chain "
-        "intelligenceScore.\n\n"
+        "Record a learning event for a BAP-578 agent on-chain: the agent's logic "
+        "contract record_learning action emits a permanent LearningRecorded event "
+        "(tokenId, dataHash, interactionCount, timestamp), routed through "
+        "VPMv2.forwardHandleAction. The event is an immutable, verifiable on-chain "
+        "learning record; it does not mutate any score.\n\n"
         "Requires: operator key configured, VPMv2 WRITE permission granted by the NFT "
         "owner (via bort_grant_permission_uri), policy allows the action. Without "
         "BORT_ALLOW_BROADCAST=1, runs simulate-only and reports what would happen."

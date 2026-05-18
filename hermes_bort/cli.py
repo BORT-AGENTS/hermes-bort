@@ -1,9 +1,12 @@
 """CLI subcommands for hermes-bort.
 
 Registers `hermes bort <subcommand>`:
-  hermes bort init-operator  : generate an operator signing key
-  hermes bort init-policy    : write the default bort-policy.yaml
-  hermes bort doctor         : diagnose the setup (env vars, RPC, funding, permissions)
+  hermes bort init-operator    : generate an operator signing key
+  hermes bort init-policy      : write the default bort-policy.yaml
+  hermes bort doctor           : diagnose the setup (env vars, RPC, funding, permissions)
+  hermes bort anchor-memory    : pin local session memory to IPFS + KR v2
+  hermes bort commit-evolution : anchor a self-evolution result on KR v2
+  hermes bort evolve           : run the self-evolution optimizer and commit it on-chain
 
 Wired into Hermes via ctx.register_cli_command in __init__.register().
 """
@@ -138,6 +141,16 @@ async def _doctor_async() -> None:
     else:
         _warn("Pinata credentials not set", "fine for now; needed only for on-chain memory anchoring later")
 
+    # --- self-evolution repo (for `hermes bort evolve`) ---
+    from . import evolution_loop
+    se_repo = evolution_loop.locate_self_evolution_repo()
+    if se_repo is not None:
+        _ok("hermes-agent-self-evolution repo found",
+            f"{se_repo} (interpreter: {evolution_loop.resolve_python(se_repo)})")
+    else:
+        _warn("hermes-agent-self-evolution repo not found",
+              "needed only for `hermes bort evolve`; set $BORT_SELF_EVOLUTION_REPO")
+
     # --- VPM v2 sanity ---
     vpm = bort_chain.ADDRESSES["VaultPermissionManager"]
     try:
@@ -178,6 +191,31 @@ def _print_kr_result(parsed: dict) -> None:
         print(f"preflight:    {_json.dumps(pf, default=str)}")
 
 
+def _print_evolve_result(result: dict) -> None:
+    """Format the chained evolution -> on-chain result from evolution_loop.chain_commits."""
+    print()
+    print("=" * 60)
+    print("EVOLUTION -> ON-CHAIN")
+    print("=" * 60)
+    evo = result.get("evolution")
+    if evo is not None:
+        print("[1] commit_evolution (KR v2 INSTRUCTION source)")
+        _print_kr_result(evo)
+    learn = result.get("learning")
+    if learn is not None:
+        if evo is not None:
+            print()
+        print("[2] commit_learning (LearningRecorded event)")
+        _print_kr_result(learn)
+    if result.get("content_hash"):
+        print()
+        print(f"linked hash:  {result['content_hash']}")
+        print("              (the same hash anchors the knowledge source and the learning event)")
+    print()
+    print(f"result:       {result.get('summary', '')}")
+    print("=" * 60)
+
+
 def _cmd_anchor_memory(args) -> None:
     import json as _json
     from .tools.anchor_memory import handle as anchor_handle
@@ -192,6 +230,91 @@ def _cmd_commit_evolution(args) -> None:
         "token_id": args.token_id, "output_dir": args.output_dir, "priority": args.priority,
     }))
     _print_kr_result(_json.loads(raw))
+
+
+# evolve: run the self-evolution optimizer, then commit the result on-chain
+async def _evolve_async(args) -> None:
+    from . import evolution_loop as evo
+
+    skill = args.skill
+    if not evo.valid_skill_name(skill):
+        print(f"Invalid skill name: {skill!r}. "
+              "Allowed: letters, digits, dot, dash, underscore.")
+        return
+
+    repo = evo.locate_self_evolution_repo(args.repo)
+    if repo is None:
+        print("hermes-agent-self-evolution repo not found.")
+        print("Looked at: --repo, $BORT_SELF_EVOLUTION_REPO, "
+              "~/.hermes/hermes-agent-self-evolution, and a sibling directory.")
+        print("Clone it and pass --repo PATH or set $BORT_SELF_EVOLUTION_REPO.")
+        return
+
+    # pre-flight: fail fast before the slow, paid optimizer run
+    pf = await evo.preflight_check(args.token_id)
+    print("Pre-flight:")
+    for note in pf["notes"]:
+        print(f"  - {note}")
+    if not pf["ok"]:
+        print("Pre-flight failed; not running the optimizer:")
+        for problem in pf["problems"]:
+            print(f"  [FAIL] {problem}")
+        return
+
+    if args.commit_only:
+        run_dir = evo.latest_existing_run_dir(repo, skill)
+        if run_dir is None:
+            print(f"--commit-only: no existing run dir under {repo / 'output' / skill}")
+            return
+        print(f"[commit-only] using existing run: {run_dir}")
+    else:
+        python = evo.resolve_python(repo)
+        print()
+        print(f"Evolving skill '{skill}' for agent {args.token_id}")
+        print(f"  repo:        {repo}")
+        print(f"  interpreter: {python}")
+        print(f"  iterations:  {args.iterations}")
+        print("Running the optimizer (this can take several minutes)...")
+        print("-" * 60)
+        run = evo.run_optimizer(repo, python, skill, args.iterations)
+        print("-" * 60)
+        if run.error:
+            print(f"Optimizer did not produce a committable result: {run.error}")
+            if run.failed_marker:
+                print("  (an evolved_FAILED.md was written: the variant failed guardrails)")
+            return
+        if run.run_dir is None:
+            if run.failed_marker:
+                print("Optimizer produced evolved_FAILED.md: the variant failed guardrails. "
+                      "Nothing to commit.")
+            else:
+                print("Optimizer finished but produced no run dir and no evolved_FAILED.md. "
+                      "Nothing to commit.")
+            return
+        if run.note:
+            print(f"note: {run.note}")
+        if not run.metrics:
+            print(f"Run dir {run.run_dir} has no readable metrics.json; not committing.")
+            return
+        improvement = run.metrics.get("improvement", 0) or 0
+        if improvement <= 0:
+            print(f"Skill did not improve (improvement={improvement}). Not committing.")
+            return
+        if improvement < args.min_improvement:
+            print(f"Improvement {improvement} below --min-improvement "
+                  f"{args.min_improvement}. Not committing.")
+            return
+        print(f"Skill improved (improvement={improvement}). Committing on-chain...")
+        run_dir = run.run_dir
+
+    result = await evo.chain_commits(
+        args.token_id, run_dir, priority=args.priority, only=args.only,
+    )
+    _print_evolve_result(result)
+
+
+def _cmd_evolve(args) -> None:
+    asyncio.run(_evolve_async(args))
 
 
 # argparse wiring
@@ -221,12 +344,31 @@ def setup_bort_cli(subparser) -> None:
     p_evo.add_argument("--priority", type=int, default=50, help="Knowledge-source priority (default 50)")
     p_evo.set_defaults(func=_cmd_commit_evolution)
 
+    p_ev = sub.add_parser(
+        "evolve",
+        help="Run the self-evolution optimizer for a skill and, if it improved, "
+             "anchor it on KR v2 + record the learning event on-chain",
+    )
+    p_ev.add_argument("skill", help="Skill name to evolve (e.g. github-code-review)")
+    p_ev.add_argument("--token-id", dest="token_id", type=int, required=True, help="BAP-578 token ID")
+    p_ev.add_argument("--iterations", type=int, default=10, help="GEPA iterations (default 10)")
+    p_ev.add_argument("--repo", default=None, help="Path to the hermes-agent-self-evolution repo")
+    p_ev.add_argument("--priority", type=int, default=50, help="KR v2 knowledge-source priority (default 50)")
+    p_ev.add_argument("--commit-only", dest="commit_only", action="store_true",
+                      help="Skip the optimizer; commit the latest existing run dir")
+    p_ev.add_argument("--only", choices=["both", "evolution", "learning"], default="both",
+                      help="Which on-chain steps to do (default both)")
+    p_ev.add_argument("--min-improvement", dest="min_improvement", type=float, default=0.0,
+                      help="Only commit if metrics improvement >= this value (default 0.0)")
+    p_ev.set_defaults(func=_cmd_evolve)
+
 
 def handle_bort_cli(args) -> None:
     """Dispatch to the chosen sub-subcommand."""
     func = getattr(args, "func", None)
     if func is None:
-        print("Usage: hermes bort <init-operator | init-policy | doctor>")
+        print("Usage: hermes bort <init-operator | init-policy | doctor | "
+              "anchor-memory | commit-evolution | evolve>")
         return
     func(args)
 
